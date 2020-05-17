@@ -24,32 +24,37 @@ if(ENABLE_CLANG_FORMAT)
         format
     )
 
-    # Find all *.h and *.cpp in git tracked files including untracked and cached files but
-    # excluding git ignored files and submodules.
-    execute_process( COMMAND
-        git ls-files --cached --others --exclude-standard -- *.hpp *.cpp
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        RESULT_VARIABLE SOURCES_RESULT
-        OUTPUT_VARIABLE SOURCES
+    set(FORMAT_FILE_EXTENTIONS *.hpp         *.cpp         *.h         *.c        )
+    set(FORMAT_FILE_TYPES      "C++ Headers" "C++ Sources" "C Headers" "C Sources")
+    set(FORMAT_FILE_INDEX_STOP 3)
+    set(FORMAT_FILE_LIST_PATH "${CMAKE_BINARY_DIR}/clang-format-files.txt")
+    set(FORMAT_PRINT "${CMAKE_BINARY_DIR}/clang-format-print.txt")
+
+    file(TOUCH ${FORMAT_FILE_LIST_PATH})
+
+    # Find all files of interest using git ls-files for tracked, untracked and
+    # cached files but excluding git ignored files and submodules.
+    # Root level hidden directories (i.e. dot folders) are also ignored.
+    add_custom_command(TARGET format
+        # git ls-files
+        COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_SOURCE_DIR} git ls-files --cached --others
+            --exclude-standard -- ${FORMAT_FILE_EXTENTIONS} > ${FORMAT_FILE_LIST_PATH}
+        # remove hidden directories
+        COMMAND sed -i '/^\\./d' ${FORMAT_FILE_LIST_PATH}
+        # create printable output
+        COMMAND ${CMAKE_COMMAND} -E copy ${FORMAT_FILE_LIST_PATH} ${FORMAT_PRINT}
+        # only keep directory name and file extension
+        COMMAND sed -i 's/\\/.*\\./ /' ${FORMAT_PRINT}
+        COMMAND sort -u -o ${FORMAT_PRINT} ${FORMAT_PRINT}
+        COMMAND sed -i 's/^/ - formatting in /' ${FORMAT_PRINT}
+        COMMAND cat ${FORMAT_PRINT}
     )
-    if (NOT SOURCES_RESULT EQUAL 0)
-        message(FATAL_ERROR "command `git ls-files ...` returned code ${SOURCES_RESULT}")
-    endif()
 
-    if(NOT "${SOURCES}" STREQUAL "")
-        string(REPLACE "\n" ";" SOURCES ${SOURCES})
-
-        list(TRANSFORM SOURCES PREPEND "${CMAKE_SOURCE_DIR}/")
-        # Transform prepend seems to add an extra element at the end
-        list(POP_BACK SOURCES EXTRA)
-        if (NOT "${EXTRA}" STREQUAL "${CMAKE_SOURCE_DIR}/")
-            message(FATAL_ERROR "${EXTRA} != ${CMAKE_SOURCE_DIR}/") #
-        endif()
-
-        add_custom_command(TARGET format
-            COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_BINARY_DIR} ${BF_CLANG_FORMAT} --verbose -i ${SOURCES}
-        )
-    endif()
+    # Do clang format
+    add_custom_command(TARGET format
+        COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_SOURCE_DIR} cat ${FORMAT_FILE_LIST_PATH} |
+            ${CMAKE_COMMAND} -E chdir ${CMAKE_SOURCE_DIR} xargs -d '\\n' ${BF_CLANG_FORMAT} -i
+    )
 
     add_custom_command(TARGET format
         COMMAND ${CMAKE_COMMAND} -E cmake_echo_color --green "done"
